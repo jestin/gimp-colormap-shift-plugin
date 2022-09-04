@@ -63,6 +63,16 @@ const GimpPlugInInfo PLUG_IN_INFO =
   run,   /* run_proc   */
 };
 
+typedef struct
+{
+	guint8     offset;	 /* number of collors to offset the colormap */
+} ColorShiftVals;
+
+static const ColorShiftVals defaults = {
+	16
+};
+
+static ColorShiftVals colorshiftvals = defaults;
 
 MAIN ()
 
@@ -138,20 +148,16 @@ run (const gchar      *name,
 
 		if (status == GIMP_PDB_SUCCESS)
 		{
-			gint n_cols;
-
-			g_free (gimp_image_get_colormap (image_ID, &n_cols));
-
 			switch (run_mode)
 			{
 				case GIMP_RUN_INTERACTIVE:
 					// TODO: replace with call to dialog
-					shift_color_map (cmap, &shifted_map, palsize, 16);
-					gimp_image_set_colormap(image_ID, shifted_map, palsize);
-					status = GIMP_PDB_SUCCESS;
+					// shift_color_map (cmap, &shifted_map, palsize, 16);
+					// gimp_image_set_colormap(image_ID, shifted_map, palsize);
+					// status = GIMP_PDB_SUCCESS;
 
-			// 		if (! shift_dialog (image_ID, map))
-			// 			status = GIMP_PDB_CANCEL;
+					if (! shift_dialog (image_ID, map))
+						status = GIMP_PDB_CANCEL;
 					break;
 
 				case GIMP_RUN_NONINTERACTIVE:
@@ -160,12 +166,12 @@ run (const gchar      *name,
 
 					if (status == GIMP_PDB_SUCCESS)
 					{
-						if (n_cols != param[3].data.d_int32)
+						if (palsize != param[3].data.d_int32)
 							status = GIMP_PDB_CALLING_ERROR;
 
 						if (status == GIMP_PDB_SUCCESS)
 						{
-							for (i = 0; i < n_cols; i++)
+							for (i = 0; i < palsize; i++)
 								map[i] = param[4].data.d_int8array[i];
 						}
 					}
@@ -204,15 +210,11 @@ enum
   COLOR_INDEX,
   COLOR_INDEX_TEXT,
   COLOR_RGB,
-  COLOR_H,
-  COLOR_S,
-  COLOR_V,
   NUM_COLS
 };
 
 static  GtkUIManager *shift_ui  = NULL;
 static  gboolean      shift_run = FALSE;
-static  gint          reverse_order[256];
 
 static void shift_color_map(guchar* orig,
 		guchar** shifted,
@@ -268,11 +270,6 @@ shift_ui_manager_new (GtkWidget    *window,
   gtk_ui_manager_add_ui_from_string (ui_manager,
                                      "<ui>"
                                      "  <popup name=\"shift-popup\">"
-                                     "    <menuitem action=\"sort-hue\" />"
-                                     "    <menuitem action=\"sort-sat\" />"
-                                     "    <menuitem action=\"sort-val\" />"
-                                     "    <separator />"
-                                     "    <menuitem action=\"reverse\" />"
                                      "    <menuitem action=\"reset\" />"
                                      "  </popup>"
                                      "</ui>",
@@ -344,12 +341,12 @@ shift_dialog (gint32  image_ID,
   GtkCellRenderer *renderer;
   GtkTreeIter      iter;
   guchar          *cmap;
-  gint             ncols, i;
+  gint             palsize, i;
   gboolean         valid;
 
   gimp_ui_init (PLUG_IN_BINARY, FALSE);
 
-  dialog = gimp_dialog_new ("Rearrange Colormap", PLUG_IN_ROLE,
+  dialog = gimp_dialog_new ("Shift Colormap", PLUG_IN_ROLE,
                             NULL, 0,
                             gimp_standard_help_func, PLUG_IN_PROC_SHIFT,
 
@@ -372,20 +369,19 @@ shift_dialog (gint32  image_ID,
   gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))),
                       vbox, TRUE, TRUE, 0);
 
-  cmap = gimp_image_get_colormap (image_ID, &ncols);
+  cmap = gimp_image_get_colormap (image_ID, &palsize);
 
-  g_return_val_if_fail ((ncols > 0) && (ncols <= 256), FALSE);
+  g_return_val_if_fail ((palsize > 0) && (palsize <= 256), FALSE);
 
   store = gtk_list_store_new (NUM_COLS,
                               G_TYPE_INT, G_TYPE_STRING, GIMP_TYPE_RGB,
                               G_TYPE_DOUBLE, G_TYPE_DOUBLE, G_TYPE_DOUBLE);
 
-  for (i = 0; i < ncols; i++)
+  for (i = 0; i < palsize; i++)
     {
       GimpRGB  rgb;
       GimpHSV  hsv;
       gint     index = map[i];
-      gchar   *text  = g_strdup_printf ("%d", index);
 
       gimp_rgb_set_uchar (&rgb,
                           cmap[index * 3],
@@ -393,18 +389,10 @@ shift_dialog (gint32  image_ID,
                           cmap[index * 3 + 2]);
       gimp_rgb_to_hsv (&rgb, &hsv);
 
-      reverse_order[i] = ncols - i - 1;
-
       gtk_list_store_append (store, &iter);
       gtk_list_store_set (store, &iter,
-                          COLOR_INDEX,      index,
-                          COLOR_INDEX_TEXT, text,
                           COLOR_RGB,        &rgb,
-                          COLOR_H,          hsv.h,
-                          COLOR_S,          hsv.s,
-                          COLOR_V,          hsv.v,
                           -1);
-      g_free (text);
     }
 
   g_free (cmap);
@@ -423,7 +411,7 @@ shift_dialog (gint32  image_ID,
   gtk_icon_view_set_columns (GTK_ICON_VIEW (iconview), 16);
   gtk_icon_view_set_row_spacing (GTK_ICON_VIEW (iconview), 0);
   gtk_icon_view_set_column_spacing (GTK_ICON_VIEW (iconview), 0);
-  gtk_icon_view_set_reorderable (GTK_ICON_VIEW (iconview), TRUE);
+  gtk_icon_view_set_reorderable (GTK_ICON_VIEW (iconview), FALSE);
 
   renderer = gimp_cell_renderer_color_new ();
   gtk_cell_layout_pack_start (GTK_CELL_LAYOUT (iconview), renderer, TRUE);
@@ -431,17 +419,16 @@ shift_dialog (gint32  image_ID,
                                   "color", COLOR_RGB,
                                   NULL);
   g_object_set (renderer,
-                "width", 24,
+                "width", 0,
                 NULL);
 
   renderer = gtk_cell_renderer_text_new ();
   gtk_cell_layout_pack_start (GTK_CELL_LAYOUT (iconview), renderer, TRUE);
   gtk_cell_layout_set_attributes (GTK_CELL_LAYOUT (iconview), renderer,
-                                  "text", COLOR_INDEX_TEXT,
                                   NULL);
   g_object_set (renderer,
-                "size-points", 6.0,
-                "xalign",      0.5,
+                "size-points", 0.0,
+                "xalign",      0.0,
                 "ypad",        0,
                 NULL);
 
