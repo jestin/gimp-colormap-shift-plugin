@@ -68,8 +68,8 @@ static const ColorShiftVals defaults = {
 	16
 };
 
-static ColorShiftVals colorshiftvals = defaults;
-static guint		palsize = 0;
+static ColorShiftVals	colorshiftvals = defaults;
+static gint				palsize = 0;
 
 MAIN ()
 
@@ -342,7 +342,7 @@ static gboolean shift_dialog (gint32  image_ID,
 	GtkCellRenderer *renderer;
 	GtkTreeIter      iter;
 	guchar          *cmap;
-	gint             i;
+	gint             n_cols,i;
 	gboolean         valid;
 
 	gimp_ui_init (PLUG_IN_BINARY, FALSE);
@@ -370,9 +370,11 @@ static gboolean shift_dialog (gint32  image_ID,
 	gtk_box_pack_start (GTK_BOX (gtk_dialog_get_content_area (GTK_DIALOG (dialog))),
 			vbox, TRUE, TRUE, 0);
 
-	cmap = gimp_image_get_colormap (image_ID, &palsize);
+	cmap = gimp_image_get_colormap (image_ID, &n_cols);
 
-	g_return_val_if_fail ((palsize > 0) && (palsize <= 256), FALSE);
+	palsize = n_cols;
+
+	g_return_val_if_fail ((n_cols > 0) && (n_cols <= 256), FALSE);
 
 	store = gtk_list_store_new (NUM_COLS,
 			G_TYPE_INT, // COLOR_INDEX
@@ -382,7 +384,7 @@ static gboolean shift_dialog (gint32  image_ID,
 			G_TYPE_INT, // BLUE
 			GIMP_TYPE_RGB); // COLOR_RGB
 
-	for (i = 0; i < palsize; i++)
+	for (i = 0; i < n_cols; i++)
 	{
 		GimpRGB  rgb;
 		GimpHSV  hsv;
