@@ -47,11 +47,6 @@ static void       run          (const gchar      *name,
 		gint             *nreturn_vals,
 		GimpParam       **return_vals);
 
-static void shift_color_map(guchar* orig,
-		guchar** shifted,
-		gint palsize,
-		gint offset);
-
 static gboolean   shift_dialog (gint32            image_ID,
 		guchar           *map);
 
@@ -74,6 +69,7 @@ static const ColorShiftVals defaults = {
 };
 
 static ColorShiftVals colorshiftvals = defaults;
+static guint		palsize = 0;
 
 MAIN ()
 
@@ -132,7 +128,6 @@ static void run (const gchar      *name,
 
 	image_ID = param[1].data.d_image;
 
-	gint palsize;
 	guchar *cmap = gimp_image_get_colormap (image_ID, &palsize);
 	guchar* shifted_map = (guchar*)malloc(sizeof(guchar) * palsize);
 
@@ -150,11 +145,6 @@ static void run (const gchar      *name,
 			switch (run_mode)
 			{
 				case GIMP_RUN_INTERACTIVE:
-					// TODO: replace with call to dialog
-					// shift_color_map (cmap, &shifted_map, palsize, 16);
-					// gimp_image_set_colormap(image_ID, shifted_map, palsize);
-					// status = GIMP_PDB_SUCCESS;
-
 					if (! shift_dialog (image_ID, map))
 						status = GIMP_PDB_CANCEL;
 					break;
@@ -179,11 +169,10 @@ static void run (const gchar      *name,
 
 			if (status == GIMP_PDB_SUCCESS)
 			{
-				// shift_color_map (cmap, &shifted_map, palsize, 16);
 				gimp_image_set_colormap(image_ID, map, palsize);
 
-				// if (run_mode == GIMP_RUN_INTERACTIVE)
-				// 	gimp_set_data (PLUG_IN_PROC_SHIFT, map, sizeof (map));
+				if (run_mode == GIMP_RUN_INTERACTIVE)
+					gimp_set_data (PLUG_IN_PROC_SHIFT, map, sizeof (map));
 
 				if (run_mode != GIMP_RUN_NONINTERACTIVE)
 					gimp_displays_flush ();
@@ -215,36 +204,23 @@ enum
 	NUM_COLS
 };
 
-static  GtkUIManager *shift_ui  = NULL;
-static  gboolean      shift_run = FALSE;
-
-static void shift_color_map(guchar* orig,
-		guchar** shifted,
-		gint palsize,
-		gint offset)
-{
-	gint offset_base = offset * 3;
-	for(int i = 0; i < palsize*3; i+=3)
-	{
-		if(i + offset_base >= palsize * 3)
-		{
-			// this is the last <offset> values in the color map
-			(*shifted)[i] = orig[(i + offset_base) % palsize];
-			(*shifted)[i+1] = orig[(i+1 + offset_base) % palsize];
-			(*shifted)[i+2] = orig[(i+2 + offset_base) % palsize];
-			continue;
-		}
-
-		(*shifted)[i] = orig[i+offset_base];
-		(*shifted)[i+1] = orig[i+1+offset_base];
-		(*shifted)[i+2] = orig[i+2+offset_base];
-	}
-}
+static GtkUIManager	*shift_ui  = NULL;
+static gboolean		shift_run = FALSE;
+static guint		reset_number = 0;
 
 static void shift_reset_callback (GtkAction       *action,
 		GtkTreeSortable *store)
 {
-	// TODO: figure out how to reset the order even after several selections
+	guint original_order[palsize];
+
+	for (int i = 0; i < palsize; i++)
+	{
+		original_order[i] = (i + (reset_number * 16)) % palsize;
+	}
+
+	reset_number = 0;
+
+	gtk_list_store_reorder((GtkListStore*)store, original_order);
 }
 
 static GtkUIManager * shift_ui_manager_new (GtkWidget    *window,
@@ -314,7 +290,6 @@ static void color_icon_selected(GtkIconView* iconview,
 {
 	GtkTreeIter iter;
 	guint8 image_ID;
-	guint palsize;
 	guchar* cmap;
 	guint row = gtk_icon_view_get_item_row(iconview, path);
 
@@ -324,12 +299,14 @@ static void color_icon_selected(GtkIconView* iconview,
 
 	cmap = gimp_image_get_colormap (image_ID, &palsize);
 
-	gint new_order[palsize];
+	guint new_order[palsize];
 
 	for (int i = 0; i < palsize; i++)
 	{
 		new_order[i] = (i + (row * 16)) % palsize;
 	}
+
+	reset_number += ((palsize - (row * 16)) / 16) % 16;
 
 	gtk_list_store_reorder((GtkListStore*)store, new_order);
 }
@@ -365,7 +342,7 @@ static gboolean shift_dialog (gint32  image_ID,
 	GtkCellRenderer *renderer;
 	GtkTreeIter      iter;
 	guchar          *cmap;
-	gint             palsize, i;
+	gint             i;
 	gboolean         valid;
 
 	gimp_ui_init (PLUG_IN_BINARY, FALSE);
