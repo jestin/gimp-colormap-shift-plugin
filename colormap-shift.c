@@ -28,6 +28,7 @@
 // #include "config.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include <libgimp/gimp.h>
 #include <libgimp/gimpui.h>
@@ -116,7 +117,7 @@ static void run (const gchar      *name,
 	gint32             image_ID;
 	GimpPDBStatusType  status = GIMP_PDB_SUCCESS;
 	GimpRunMode        run_mode;
-	guchar             map[256];
+	guchar             map[256 * 3];
 	gint               i;
 
 	gegl_init (NULL, NULL);
@@ -178,11 +179,11 @@ static void run (const gchar      *name,
 
 			if (status == GIMP_PDB_SUCCESS)
 			{
-				shift_color_map (cmap, &shifted_map, palsize, 16);
-				gimp_image_set_colormap(image_ID, shifted_map, palsize);
+				// shift_color_map (cmap, &shifted_map, palsize, 16);
+				gimp_image_set_colormap(image_ID, map, palsize);
 
-				if (run_mode == GIMP_RUN_INTERACTIVE)
-					gimp_set_data (PLUG_IN_PROC_SHIFT, map, sizeof (map));
+				// if (run_mode == GIMP_RUN_INTERACTIVE)
+				// 	gimp_set_data (PLUG_IN_PROC_SHIFT, map, sizeof (map));
 
 				if (run_mode != GIMP_RUN_NONINTERACTIVE)
 					gimp_displays_flush ();
@@ -206,7 +207,10 @@ static void run (const gchar      *name,
 enum
 {
 	COLOR_INDEX,
-	COLOR_INDEX_TEXT,
+	IMAGE_ID,
+	RED,
+	GREEN,
+	BLUE,
 	COLOR_RGB,
 	NUM_COLS
 };
@@ -240,6 +244,7 @@ static void shift_color_map(guchar* orig,
 static void shift_reset_callback (GtkAction       *action,
 		GtkTreeSortable *store)
 {
+	// TODO: figure out how to reset the order even after several selections
 }
 
 static GtkUIManager * shift_ui_manager_new (GtkWidget    *window,
@@ -300,6 +305,33 @@ static gboolean shift_button_press (GtkWidget      *widget,
 		return shift_popup_menu (widget, event);
 
 	return FALSE;
+}
+
+static void color_icon_selected(GtkIconView* iconview,
+		GtkTreePath* path,
+		gpointer user_data)
+
+{
+	GtkTreeIter iter;
+	guint8 image_ID;
+	guint palsize;
+	guchar* cmap;
+	guint row = gtk_icon_view_get_item_row(iconview, path);
+
+	GtkTreeModel* store = gtk_icon_view_get_model(iconview);
+	gtk_tree_model_get_iter (store, &iter, path);
+	gtk_tree_model_get(store, &iter, IMAGE_ID, &image_ID, -1);
+
+	cmap = gimp_image_get_colormap (image_ID, &palsize);
+
+	gint new_order[palsize];
+
+	for (int i = 0; i < palsize; i++)
+	{
+		new_order[i] = (i + (row * 16)) % palsize;
+	}
+
+	gtk_list_store_reorder((GtkListStore*)store, new_order);
 }
 
 static void shift_response (GtkWidget       *dialog,
@@ -366,24 +398,31 @@ static gboolean shift_dialog (gint32  image_ID,
 	g_return_val_if_fail ((palsize > 0) && (palsize <= 256), FALSE);
 
 	store = gtk_list_store_new (NUM_COLS,
-			G_TYPE_INT, G_TYPE_STRING, GIMP_TYPE_RGB,
-			G_TYPE_DOUBLE, G_TYPE_DOUBLE, G_TYPE_DOUBLE);
+			G_TYPE_INT, // COLOR_INDEX
+			G_TYPE_INT, // IMAGE_ID
+			G_TYPE_INT, // RED
+			G_TYPE_INT, // GREEN
+			G_TYPE_INT, // BLUE
+			GIMP_TYPE_RGB); // COLOR_RGB
 
 	for (i = 0; i < palsize; i++)
 	{
 		GimpRGB  rgb;
 		GimpHSV  hsv;
-		gint     index = map[i];
 
 		gimp_rgb_set_uchar (&rgb,
-				cmap[index * 3],
-				cmap[index * 3 + 1],
-				cmap[index * 3 + 2]);
-		gimp_rgb_to_hsv (&rgb, &hsv);
+				cmap[i * 3],
+				cmap[i * 3 + 1],
+				cmap[i * 3 + 2]);
 
 		gtk_list_store_append (store, &iter);
 		gtk_list_store_set (store, &iter,
-				COLOR_RGB,        &rgb,
+				COLOR_INDEX,		i,
+				IMAGE_ID,			image_ID,
+				RED,				cmap[i*3],
+				GREEN,				cmap[i*3+1],
+				BLUE,				cmap[i*3+2],
+				COLOR_RGB,			&rgb,
 				-1);
 	}
 
@@ -393,6 +432,8 @@ static gboolean shift_dialog (gint32  image_ID,
 
 	iconview = gtk_icon_view_new_with_model (GTK_TREE_MODEL (store));
 	g_object_unref (store);
+
+
 
 	gtk_box_pack_start (GTK_BOX (vbox), iconview, TRUE, TRUE, 0);
 
@@ -411,7 +452,7 @@ static gboolean shift_dialog (gint32  image_ID,
 			"color", COLOR_RGB,
 			NULL);
 	g_object_set (renderer,
-			"width", 0,
+			"width", 16,
 			NULL);
 
 	renderer = gtk_cell_renderer_text_new ();
@@ -432,9 +473,11 @@ static gboolean shift_dialog (gint32  image_ID,
 			G_CALLBACK (shift_button_press),
 			NULL);
 
-	box = gimp_hint_box_new (("Drag and drop colors to rearrange the colormap.  "
-				"The numbers shown are the original indices.  "
-				"Right-click for a menu with sort options."));
+	g_signal_connect (iconview, "item-activated",
+			G_CALLBACK (color_icon_selected),
+			NULL);
+
+	box = gimp_hint_box_new ("Select any color from the row you want to shift to.");
 
 	gtk_box_pack_start (GTK_BOX (vbox), box, FALSE, FALSE, 0);
 	gtk_widget_show (box);
@@ -453,12 +496,19 @@ static gboolean shift_dialog (gint32  image_ID,
 			valid;
 			valid = gtk_tree_model_iter_next (GTK_TREE_MODEL (store), &iter))
 	{
-		gint index;
+		guchar red;
+		guchar green;
+		guchar blue;
 
 		gtk_tree_model_get (GTK_TREE_MODEL (store), &iter,
-				COLOR_INDEX, &index,
+				RED, &red,
+				GREEN, &green,
+				BLUE, &blue,
 				-1);
-		map[i++] = index;
+
+		map[i++] = red;
+		map[i++] = green;
+		map[i++] = blue;
 	}
 
 	gtk_widget_destroy (dialog);
