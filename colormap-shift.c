@@ -290,14 +290,11 @@ static void color_icon_selected(GtkIconView* iconview,
 {
 	GtkTreeIter iter;
 	guint8 image_ID;
-	guchar* cmap;
 	guint row = gtk_icon_view_get_item_row(iconview, path);
 
 	GtkTreeModel* store = gtk_icon_view_get_model(iconview);
 	gtk_tree_model_get_iter (store, &iter, path);
 	gtk_tree_model_get(store, &iter, IMAGE_ID, &image_ID, -1);
-
-	cmap = gimp_image_get_colormap (image_ID, &palsize);
 
 	guint new_order[palsize];
 
