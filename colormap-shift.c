@@ -59,16 +59,6 @@ const GimpPlugInInfo PLUG_IN_INFO =
 	run,   /* run_proc   */
 };
 
-typedef struct
-{
-	guint8     offset;	 /* number of collors to offset the colormap */
-} ColorShiftVals;
-
-static const ColorShiftVals defaults = {
-	16
-};
-
-static ColorShiftVals	colorshiftvals = defaults;
 static gint				palsize = 0;
 
 MAIN ()
@@ -206,7 +196,7 @@ enum
 
 static GtkUIManager	*shift_ui  = NULL;
 static gboolean		shift_run = FALSE;
-static guint		reset_number = 0;
+static gint			reset_number = 0;
 
 static void shift_reset_callback (GtkAction       *action,
 		GtkTreeSortable *store)
@@ -215,7 +205,7 @@ static void shift_reset_callback (GtkAction       *action,
 
 	for (int i = 0; i < palsize; i++)
 	{
-		original_order[i] = (i + (reset_number * 16)) % palsize;
+		original_order[i] = (i + reset_number) % palsize;
 	}
 
 	reset_number = 0;
@@ -289,21 +279,21 @@ static void color_icon_selected(GtkIconView* iconview,
 
 {
 	GtkTreeIter iter;
-	guint8 image_ID;
 	guint row = gtk_icon_view_get_item_row(iconview, path);
+	guint col = gtk_icon_view_get_item_column(iconview, path);
+
+	gint position = (row * 16) + col;
 
 	GtkTreeModel* store = gtk_icon_view_get_model(iconview);
-	gtk_tree_model_get_iter (store, &iter, path);
-	gtk_tree_model_get(store, &iter, IMAGE_ID, &image_ID, -1);
 
 	guint new_order[palsize];
 
 	for (int i = 0; i < palsize; i++)
 	{
-		new_order[i] = (i + (row * 16)) % palsize;
+		new_order[i] = (i + position) % palsize;
 	}
 
-	reset_number += ((palsize - (row * 16)) / 16) % 16;
+	reset_number += (palsize - position) % palsize;
 
 	gtk_list_store_reorder((GtkListStore*)store, new_order);
 }
@@ -453,7 +443,8 @@ static gboolean shift_dialog (gint32  image_ID,
 			G_CALLBACK (color_icon_selected),
 			NULL);
 
-	box = gimp_hint_box_new ("Select any color from the row you want to shift to.");
+	box = gimp_hint_box_new (("Select a color to shift the color map so that "
+			"the selected color is in the first position."));
 
 	gtk_box_pack_start (GTK_BOX (vbox), box, FALSE, FALSE, 0);
 	gtk_widget_show (box);
